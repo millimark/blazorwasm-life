@@ -1,0 +1,216 @@
+﻿@page "/conwayserverwasm"
+@implements IDisposable
+@using Microsoft.Extensions.Configuration
+@inject ConwayService conwayService
+@using BlazorWasmLife.Shared;
+@using System.Diagnostics;
+
+<h1>Conway's Game of Life</h1>
+<h2>This implementation is running in the browser, but with calls to a web service for calculations.</h2>
+@if (cells == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <p>Current generation: @cells.GenerationCount</p>
+
+    <div class="row">
+        <table class="auto">
+
+            <tbody>
+                @for (var i = 0; i < cells.RowCount; i++)
+                {
+                    <tr>
+                        @for (var j = 0; j < cells.ColumnCount; j++)
+                        {
+                            var a = i;
+                            var b = j;
+                            @if (cells[i, j])
+                            {
+                                <td class="live" @onclick="@(e => ToggleCell(a, b))">
+                                </td>
+                            }
+                            else
+                            {
+                                <td class="dead" @onclick="@(e => ToggleCell(a, b))">
+                                </td>
+                            }
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!running)
+        {
+            <div class="auto" style="margin-left: 2em;">
+                Yellow cells are alive and gray cells are dead.<br />
+                Click on a cell to change it from alive to dead or vice versa.
+            </div>
+        }
+
+
+    </div>
+
+    <div class="slidecontainer">
+        <input type="range" min="100" max="1000" value="@currentInterval"
+               class="slider" id="myRange" disabled="@running"
+               @onchange="SetInterval">
+        <span>Interval between generations:</span>
+        <span style="font-weight:bold">@currentInterval ms </span>
+    </div>
+    <hr style="height:2px;border-width:0;color:gray;background-color:gray" />
+    <div class="container">
+        <div class="row">
+            <div class="col-sm">
+                <div class="row">
+                    <div class="col-sm-2">Still Life:</div>
+                    <div class="col-sm-5">
+                        <select @onchange="SelectInitial" disabled="@running">
+                            <option value="">Select Still Life initial configuration</option>
+                            <option value="Block">Block</option>
+                            <option value="Beehive">Beehive</option>
+                            <option value="Loaf">Loaf</option>
+                            <option value="Boat">Boat</option>
+                            <option value="Tub">Tub</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-sm-2">Oscillators:</div>
+                    <div class="col-sm-5">
+                        <select @onchange="SelectInitial" disabled="@running">
+                            <option value="">Select Oscillator initial configuration</option>
+                            <option value="Blinker">Blinker (period 2)</option>
+                            <option value="Toad">Toad (period 2)</option>
+                            <option value="Beacon">Beacon (period 2)</option>
+                            <option value="Pulsar">Pulsar (period 3)</option>
+                            <option value="Pentadecathlon">Pentadecathlon (period 15)</option>
+
+                        </select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-sm-2">Spaceships:</div>
+                    <div class="col-sm-5">
+                        <select @onchange="SelectInitial" disabled="@running">
+                            <option value="">Select Spaceship initial configuration</option>
+                            <option value="Glider">Glider</option>
+                            <option value="LWSS">Lightweight spaceship (LWSS)</option>
+                            <option value="MWSS">Middleweight spaceship (MWSS)</option>
+                            <option value="HWSS">Heavyweight spaceship (HWSS)</option>
+
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="col-sm">
+                @if (!running)
+                {
+                    <button class="btn btn-secondary" @onclick="ToggleRun">Start</button>
+                }
+                else
+                {
+                    <button class="btn btn-secondary"
+                            @onclick="ToggleRun">
+                        Stop
+                    </button>
+                }
+                <a href="https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life" target="_blank">Wikipedia entry for Conway's Game of Life</a>
+
+            </div>
+        </div>
+    </div>
+}
+@code {
+
+    private System.Timers.Timer timer = new System.Timers.Timer();
+    private LifeBoardInt cells;
+    private int currentInterval = 500; // ms
+    private bool running = false;
+    private bool stopRequested = false;
+
+    private void ToggleCell(int i, int j)
+    {
+        if (!running)
+        {
+            cells[i, j] = !cells[i, j];
+        }
+    }
+
+    private void ToggleRun()
+    {
+        running = !running;
+        timer.Interval = currentInterval;
+        if (running)
+        {
+            stopRequested = false;
+            timer.Enabled = true;
+        }
+        else
+        {
+            stopRequested = true;
+        }
+    }
+
+    private void SetInterval(ChangeEventArgs e)
+    {
+        var selected = e.Value.ToString();
+        if (Int32.TryParse(selected, out int newValue))
+        {
+            currentInterval = (int)(Math.Round((decimal)newValue / 100, 0) * 100);
+        }
+    }
+
+
+    private async void SelectInitial(ChangeEventArgs e)
+    {
+        if (!running)
+        {
+            var selected = e.Value.ToString();
+            cells = await conwayService.GetPatternAsync(selected);
+            await InvokeAsync(() =>
+            {
+                StateHasChanged();
+            });
+        }
+    }
+    private async void ComputeGeneration(object source, System.Timers.ElapsedEventArgs e)
+    {
+        try
+        {
+            if (!stopRequested)
+            {
+                cells = await conwayService.GetNextGeneration(cells);
+            }
+            await InvokeAsync(() =>
+            {
+                StateHasChanged();
+            });
+        }
+        finally
+        {
+            if (!stopRequested)
+            {
+                timer.Enabled = true;
+                stopRequested = false;
+            }
+        }
+    }
+
+    protected async override Task OnInitializedAsync()
+    {
+        timer.AutoReset = false;
+        timer.Elapsed += ComputeGeneration;
+        cells = await conwayService.GetPatternAsync("blank");
+        await InvokeAsync(() =>
+        {
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        timer.Elapsed -= ComputeGeneration;
+    }
+}
